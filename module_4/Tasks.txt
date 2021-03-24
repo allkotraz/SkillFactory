@@ -1,0 +1,189 @@
+# Задание 4.1
+
+SELECT ar.city,
+       count(ar.airport_code)
+FROM dst_project.airports ar
+GROUP BY ar.city
+HAVING count(ar.airport_code) > 1
+
+# Задание 4.2
+
+Вопрос 1. Таблица рейсов содержит всю информацию о прошлых, текущих и запланированных рейсах. Сколько всего статусов для рейсов определено в таблице?
+
+SELECT count(distinct fl.status)
+FROM dst_project.flights fl
+
+Вопрос 2. Какое количество самолетов находятся в воздухе на момент среза в базе (статус рейса «самолёт уже вылетел и находится в воздухе»).
+
+SELECT count(*)
+FROM dst_project.flights fl
+WHERE fl.status = 'Departed'
+
+Вопрос 3. Места определяют схему салона каждой модели. Сколько мест имеет самолет модели  (Boeing 777-300)?
+
+SELECT count(sts.seat_no)
+FROM dst_project.aircrafts arcrft
+LEFT JOIN dst_project.seats sts ON arcrft.aircraft_code = sts.aircraft_code
+WHERE arcrft.aircraft_code = '773'
+
+Вопрос 4. Сколько состоявшихся (фактических) рейсов было совершено между 1 апреля 2017 года и 1 сентября 2017 года?
+
+SELECT count(*)
+FROM dst_project.flights fl
+WHERE fl.status in ('Arrived')
+  AND fl.actual_arrival BETWEEN '2017-04-01 00:00:00' AND '2017-09-01 23:59:59'
+  
+  
+# Задание 4.3
+
+Вопрос 1. Сколько всего рейсов было отменено по данным базы?
+
+SELECT count(*)
+FROM dst_project.flights fl
+WHERE fl.status in ('Cancelled')
+
+Вопрос 2. Сколько самолетов моделей типа Boeing, Sukhoi Superjet, Airbus находится в базе авиаперевозок?
+
+SELECT case
+            when arcrft.model like 'Boeing%' then 'Boeing' 
+            when arcrft.model like 'Sukhoi Superjet%' then 'Sukhoi Superjet'
+            when arcrft.model like 'Airbus%' then 'Airbus' 
+            else 'Other'
+            end as modls,
+            count(*)
+FROM dst_project.aircrafts arcrft
+group by modls
+
+Вопрос 3. В какой части (частях) света находится больше аэропортов?
+
+select split_part(arprt.timezone, '/', 1), 
+        count(*) as cnt
+FROM dst_project.airports arprt
+group by arprt.timezone
+order by cnt desc
+
+Вопрос 4. У какого рейса была самая большая задержка прибытия за все время сбора данных? Введите id рейса (flight_id).
+
+SELECT fl.flight_id,
+        fl.actual_arrival - fl.scheduled_arrival as delay
+FROM dst_project.flights fl
+where fl.actual_arrival notnull 
+    and fl.scheduled_arrival notnull
+order by delay desc
+
+
+# Задание 4.4
+
+Вопрос 1. Когда был запланирован самый первый вылет, сохраненный в базе данных?
+
+SELECT min(fl.scheduled_departure)
+FROM dst_project.flights fl
+
+Вопрос 2. Сколько минут составляет запланированное время полета в самом длительном рейсе?
+
+SELECT fl.flight_id,
+        EXTRACT(epoch FROM fl.scheduled_arrival - fl.scheduled_departure)/60 as scheduled_duration,
+        EXTRACT(epoch FROM fl.actual_arrival - fl.actual_departure)/60 as actual_duration
+FROM dst_project.flights fl
+where fl.actual_arrival notnull 
+    and fl.scheduled_arrival notnull
+order by actual_duration desc
+
+Вопрос 3. Между какими аэропортами пролегает самый длительный по времени запланированный рейс?
+
+SELECT fl.departure_airport, 
+        fl.arrival_airport,
+        EXTRACT(epoch FROM fl.scheduled_arrival - fl.scheduled_departure) as scheduled_duration,
+        EXTRACT(epoch FROM fl.actual_arrival - fl.actual_departure) as actual_duration
+FROM dst_project.flights fl
+where fl.actual_arrival notnull 
+order by scheduled_duration desc, fl.arrival_airport
+
+Вопрос 4. Сколько составляет средняя дальность полета среди всех самолетов в минутах? Секунды округляются в меньшую сторону (отбрасываются до минут).
+
+SELECT
+        to_char(avg(EXTRACT(epoch FROM fl.scheduled_arrival - fl.scheduled_departure)/60),'FM999999999') as scheduled_duration,
+        to_char(avg(EXTRACT(epoch FROM fl.actual_arrival - fl.actual_departure)/60),'FM999999999') as actual_duration
+FROM dst_project.flights fl
+where fl.actual_arrival notnull 
+    and fl.scheduled_arrival notnull
+
+# Задание 4.5
+
+Вопрос 1. Мест какого класса у SU9 больше всего?
+
+SELECT st.fare_conditions,
+       count(st.seat_no)
+FROM dst_project.seats st
+WHERE st.aircraft_code = 'SU9'
+GROUP BY st.fare_conditions
+ORDER BY 1 DESC
+
+Вопрос 2. Какую самую минимальную стоимость составило бронирование за всю историю?
+
+SELECT min(bk.total_amount)
+FROM dst_project.BOOKINGS bk
+
+Вопрос 3. Какой номер места был у пассажира с id = 4313 788533?
+
+SELECT *
+FROM dst_project.BOARDING_PASSES bp
+LEFT JOIN dst_project.TICKETS tk ON bp.ticket_no = tk.ticket_no
+WHERE tk.passenger_id = '4313 788533'
+
+
+# Задание 5.1
+
+Вопрос 1. Анапа — курортный город на юге России. Сколько рейсов прибыло в Анапу за 2017 год?
+
+SELECT count(*)
+FROM dst_project.flights fl
+LEFT JOIN dst_project.airports airprt ON fl.arrival_airport = airprt.airport_code
+WHERE airprt.city = 'Anapa'
+  AND fl.actual_arrival BETWEEN '2017-01-01' AND '2017-12-31 23:59:59'
+
+Вопрос 2. Сколько рейсов из Анапы вылетело зимой 2017 года?
+
+SELECT count(*)
+FROM dst_project.flights fl
+LEFT JOIN dst_project.airports airprt ON fl.departure_airport = airprt.airport_code
+WHERE airprt.city = 'Anapa'
+  AND (date_trunc('month', fl.actual_departure) in ('2017-01-01',
+                                                    '2017-02-01',
+                                                    '2017-12-01'))
+  AND status not in ('Cancelled')
+
+Вопрос 3. Посчитайте количество отмененных рейсов из Анапы за все время.
+
+SELECT count(*)
+FROM dst_project.flights fl
+LEFT JOIN dst_project.airports airprt ON fl.departure_airport = airprt.airport_code
+WHERE airprt.city = 'Anapa'
+  AND status in ('Cancelled')
+
+Вопрос 4. Сколько рейсов из Анапы не летают в Москву?
+
+SELECT count(*)
+FROM dst_project.flights fl
+LEFT JOIN dst_project.airports airprt ON fl.departure_airport = airprt.airport_code
+WHERE airprt.city = 'Anapa'
+  AND fl.arrival_airport not in
+    (SELECT nst_arprt.airport_code
+     FROM dst_project.airports nst_arprt
+     WHERE nst_arprt.city = 'Moscow')
+
+Вопрос 5. Какая модель самолета летящего на рейсах из Анапы имеет больше всего мест?
+
+WITH Anapa AS
+  (SELECT DISTINCT fl.aircraft_code
+   FROM dst_project.flights fl
+   LEFT JOIN dst_project.airports airprt ON fl.departure_airport = airprt.airport_code
+   WHERE airprt.city = 'Anapa')
+SELECT arcrft.model,
+       count(sts.seat_no)
+FROM dst_project.aircrafts arcrft
+LEFT JOIN dst_project.seats sts ON arcrft.aircraft_code = sts.aircraft_code
+WHERE arcrft.aircraft_code in
+    (SELECT *
+     FROM Anapa)
+GROUP BY arcrft.model

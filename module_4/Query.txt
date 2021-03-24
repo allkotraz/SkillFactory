@@ -1,0 +1,130 @@
+---------------------------- 
+/* 
+
+Определение какие зимние месяцы каких годов имеются в нашей БД
+На основе данного определения будем частично строить расчет стоимости топлива в месяц.
+
+*/
+
+SELECT Extract(MONTH
+               FROM fl.scheduled_departure::date) AS nuber_month,
+       Extract(YEAR
+               FROM fl.scheduled_departure::date) AS YEAR
+FROM dst_project.flights fl
+WHERE fl.departure_airport = 'AAQ'
+  AND Extract(MONTH
+              FROM fl.scheduled_departure::date) in (1, 2, 12)
+  AND fl.status not in ('Cancelled')
+GROUP BY 1, 2
+
+----------------------------
+
+
+
+----------------------------
+/*
+
+ Запрос для выборки основного дс, расход топлива взят из разных официальных источников,
+ в т.ч. с форума для самолета 'Cessna 208 Caravan', поскольку в документации расход в л/км,
+ в то время как необходимо для расчета считать кг/час.
+ 
+ Информация по цене топлива взята с сайта Министерства транспорта РФ, для каждого месяца полёта.
+ https://favt.gov.ru/dejatelnost-ajeroporty-i-ajerodromy-ceny-na-aviagsm/
+ 
+ Влияние брони на доходность прикрутить не успел, каюсь.
+ 
+ Комментарии в тексте запроса были оставлены для собственного удобства.
+ 
+ Описание полей дублирую для удобства:
+ 
+	flight_id 			   			- Идентификатор рейса
+	flight_no 			   			- Номер рейса
+	scheduled_departure    			- Запланированное время отправления
+	scheduled_arrival 	  			- Запланированное время прибытия
+	departure_airport	  			- Аэропорт отправления
+	departure_city		   			- Город отправления
+	arrival_airport		   			- Аэропорт прибытия
+	arrival_city		   			- Город прибытия
+	actual_departure	   			- Фактическое время отправления
+	actual_arrival 		   			- Фактическое время прибытия
+	departure_delay		   			- Время задержки отправления
+	arrival_delay		   			- Время задержки прибытия
+	sum_price_tiket 	   			- Сумма билетов (Участвует в расчете дохода)
+	Flight_time						- Фактическое время в пути
+	Tons_of_fuel_per_hour  			- Расход топлива (тонн/час)
+	price_per_tons_fuel_per_month 	- Цена тонны топлива в месяц вылета
+	сosts_per_hour		   			-  Расход в денежном выражении в час
+	flight_profit		   			- Прибыль рейса (Сумма билетов -  время    полёта * расход топлива * цену топлива)
+ 
+ P.S. Сделаю сам себе замечание по поводу оконных функций, пока не вошло в привычку их использование,
+ и в этом конечно есть небольшой минус, но думаю когда нибудь созрею что бы использовать их постоянно и применять повсеместно,
+ а пока, не могу =)
+ 
+ */
+
+
+
+WITH general_flight_information AS
+  (SELECT fl.*,
+          EXTRACT(epoch
+                  FROM fl.actual_departure - fl.scheduled_departure)/60 AS departure_delay,
+          EXTRACT(epoch
+                  FROM fl.actual_arrival - fl.scheduled_arrival)/60 AS arrival_delay,
+          sum(tik_fl.amount) AS sum_price_tiket,
+          EXTRACT(epoch
+                  FROM fl.actual_arrival - fl.actual_departure)/3600 AS Flight_time,
+          CASE
+              WHEN arcrft.model = 'Boeing 777-300' THEN 7290/1000. -- тонн топлива в час
+
+              WHEN arcrft.model = 'Boeing 767-300' THEN 4800/1000.
+              WHEN arcrft.model = 'Sukhoi Superjet-100' THEN 1700/1000.
+              WHEN arcrft.model = 'Airbus A320-200' THEN 2580/1000.
+              WHEN arcrft.model = 'Airbus A321-200' THEN 3200/1000.
+              WHEN arcrft.model = 'Airbus A319-100' THEN 2600/1000.
+              WHEN arcrft.model = 'Boeing 737-300' THEN 2600/1000.
+              WHEN arcrft.model = 'Cessna 208 Caravan' THEN 150/1000.
+              WHEN arcrft.model = 'Bombardier CRJ-200' THEN 1260/1000.
+          END AS Tons_of_fuel_per_hour,
+          CASE
+              WHEN Extract(MONTH
+                           FROM fl.scheduled_departure::date) = 1 THEN 41435 -- Январь 2017
+
+              WHEN Extract(MONTH
+                           FROM fl.scheduled_departure::date) = 2 THEN 39553 -- Февраль 2017
+
+              WHEN Extract(MONTH
+                           FROM fl.scheduled_departure::date) = 12 THEN 38867 -- Декабрь 2016
+
+          END AS price_per_tons_fuel_per_month
+   FROM dst_project.flights fl
+   LEFT JOIN dst_project.TICKET_FLIGHTS tik_fl ON fl.flight_id = tik_fl.flight_id
+   LEFT JOIN dst_project.aircrafts arcrft ON fl.aircraft_code = arcrft.aircraft_code
+   WHERE fl.departure_airport = 'AAQ'
+     AND Extract(MONTH
+                 FROM fl.scheduled_departure::date) in (1, 2 ,12)
+     AND fl.status not in ('Cancelled')
+   GROUP BY fl.flight_id,
+            Tons_of_fuel_per_hour)
+SELECT gfi.flight_id,
+       gfi.flight_no,
+       gfi.scheduled_departure,
+       gfi.scheduled_arrival,
+       gfi.departure_airport,
+       departure_airprts.city AS departure_city,
+       gfi.arrival_airport,
+       arrival_airprts.city AS arrival_city,
+       gfi.actual_departure,
+       gfi.actual_arrival,
+       gfi.departure_delay,
+       gfi.arrival_delay,
+       gfi.sum_price_tiket,
+       gfi.Flight_time,
+       gfi.Tons_of_fuel_per_hour,
+       gfi.price_per_tons_fuel_per_month,
+       gfi.Tons_of_fuel_per_hour * gfi.price_per_tons_fuel_per_month * gfi.Flight_time AS сosts_per_hour,
+       coalesce(gfi.sum_price_tiket, 0) - (gfi.Flight_time * gfi.Tons_of_fuel_per_hour * gfi.price_per_tons_fuel_per_month) AS flight_profit
+FROM general_flight_information gfi
+LEFT JOIN dst_project.airports departure_airprts ON gfi.departure_airport = departure_airprts.airport_code
+LEFT JOIN dst_project.airports arrival_airprts ON gfi.arrival_airport = arrival_airprts.airport_code
+
+----------------------------
